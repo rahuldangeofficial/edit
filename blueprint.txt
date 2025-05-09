@@ -1,0 +1,94 @@
+function startEditor(filePath):
+    FilePath ← filePath
+    Lines ← load(filePath) OR [""]
+    Cursor ← (0, 0)
+    Loop ← true
+
+    while Loop:
+        renderScreen(Lines, Cursor)
+        key ← getKey()
+
+        switch key:
+            case Ctrl+Q:
+                Loop ← false
+
+            case ArrowUp:
+                Cursor.row ← max(0, Cursor.row - 1)
+                Cursor.col ← min(Cursor.col, length(Lines[Cursor.row]))
+
+            case ArrowDown:
+                Cursor.row ← min(lineCount() - 1, Cursor.row + 1)
+                Cursor.col ← min(Cursor.col, length(Lines[Cursor.row]))
+
+            case ArrowLeft:
+                Cursor.col ← max(0, Cursor.col - 1)
+
+            case ArrowRight:
+                Cursor.col ← min(length(Lines[Cursor.row]), Cursor.col + 1)
+
+            case Backspace:
+                handleBackspace()
+
+            case Enter:
+                insertNewLine()
+
+            case PrintableChar(ch):
+                insertChar(ch)
+
+        autosave()
+
+HELPERS
+
+function load(path):
+    if file exists:
+        return readLines(path)
+    else:
+        return [""]
+
+function autosave():
+    writeLines(FilePath, Lines)
+
+function lineCount():
+    return length(Lines)
+
+function insertChar(ch):
+    line ← Lines[Cursor.row]
+    Lines[Cursor.row] ← line[:Cursor.col] + ch + line[Cursor.col:]
+    Cursor.col ← Cursor.col + 1
+
+function handleBackspace():
+    if Cursor.col > 0:
+        line ← Lines[Cursor.row]
+        Lines[Cursor.row] ← line[:Cursor.col - 1] + line[Cursor.col:]
+        Cursor.col ← Cursor.col - 1
+    else if Cursor.row > 0:
+        prev ← Lines[Cursor.row - 1]
+        curr ← Lines[Cursor.row]
+        Lines[Cursor.row - 1] ← prev + curr
+        remove Lines[Cursor.row]
+        Cursor.row ← Cursor.row - 1
+        Cursor.col ← length(prev)
+
+function insertNewLine():
+    line ← Lines[Cursor.row]
+    after ← line[Cursor.col:]
+    Lines[Cursor.row] ← line[:Cursor.col]
+    insert after into Lines at Cursor.row + 1
+    Cursor.row ← Cursor.row + 1
+    Cursor.col ← 0
+
+RENDERING
+
+function renderScreen(lines, cursor):
+    clear()
+    for i in 0 to lineCount() - 1:
+        printAt(row = i, col = 0, text = lines[i])
+    moveCursor(cursor.row, cursor.col)
+
+USECASE
+
+"edit file.txt" → launches editor
+Everything typed is written instantly
+Cursor moves like a spreadsheet (Up/Down/Left/Right)
+Backspace edits, Enter adds lines
+Ctrl+Q exits
