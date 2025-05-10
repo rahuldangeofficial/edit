@@ -318,8 +318,9 @@ int main(int argc, char *argv[])
 
     load_file(argv[1]);
 
-    initscr();
     setenv("TERM", "xterm-256color", 1);
+    setenv("ESCDELAY", "25", 1);         
+    initscr();
     raw();
     noecho();
     keypad(stdscr, TRUE);
