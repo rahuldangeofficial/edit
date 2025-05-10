@@ -54,6 +54,19 @@ It’s like opening Notepad in the terminal — **type, auto-save, exit**. Nothi
    * WSL / minimal CLI shells
 
 ---
+### Demo Screenshots
+
+![edit usage](./screenshots/editUsage.png)
+
+![edit open file](./screenshots/openFile.png)
+
+![edit edit file](./screenshots/editFileInEdit.png)
+
+![run file](./screenshots/runFile.png)
+
+![file output](./screenshots/output.png)
+
+---
 
 ### Planned Features
 
