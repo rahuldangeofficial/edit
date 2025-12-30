@@ -20,6 +20,7 @@
 #include <limits.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <signal.h>
 
 #define MAX_LINES 10000
 #define MAX_COLS 1024
@@ -32,6 +33,7 @@ int line_count = 0;
 
 char filename[PATH_MAX];
 char tempname[PATH_MAX];
+volatile sig_atomic_t quit_flag = 0;
 
 int cx = 0, cy = 0;
 int rowoff = 0, coloff = 0;
@@ -41,14 +43,22 @@ void cleanup(void)
 {
     endwin();
     for (int i = 0; i < line_count; i++)
-        free(lines[i]);
+        if (lines[i]) {
+            free(lines[i]);
+            lines[i] = NULL;
+        }
+}
+
+void signal_handler(int sig)
+{
+    quit_flag = 1;
 }
 
 void atomic_save(void)
 {
     int needsave = 0;
     for (int i = 0; i < line_count; i++)
-        if (dirty[i])
+        if (dirty[i] && lines[i])
         {
             needsave = 1;
             break;
@@ -59,18 +69,44 @@ void atomic_save(void)
 
     snprintf(tempname, sizeof(tempname), "%s.tmp", filename);
     int fd = open(tempname, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0)
+    if (fd < 0) {
+        fprintf(stderr, "Error creating temp file: %s\n", strerror(errno));
         return;
+    }
 
     for (int i = 0; i < line_count; i++)
     {
-        write(fd, lines[i], strlen(lines[i]));
-        if (i < line_count - 1)
-            write(fd, "\n", 1);
+        if (!lines[i]) continue;
+        size_t len = strlen(lines[i]);
+        if (write(fd, lines[i], len) != (ssize_t)len) {
+            close(fd);
+            unlink(tempname);
+            fprintf(stderr, "Error writing to temp file: %s\n", strerror(errno));
+            return;
+        }
+        if (i < line_count - 1) {
+            if (write(fd, "\n", 1) != 1) {
+                close(fd);
+                unlink(tempname);
+                fprintf(stderr, "Error writing newline to temp file: %s\n", strerror(errno));
+                return;
+            }
+        }
     }
-    fsync(fd);
+    
+    if (fsync(fd) != 0) {
+        close(fd);
+        unlink(tempname);
+        fprintf(stderr, "Error syncing temp file: %s\n", strerror(errno));
+        return;
+    }
+    
     close(fd);
-    rename(tempname, filename);
+    if (rename(tempname, filename) != 0) {
+        unlink(tempname);
+        fprintf(stderr, "Error renaming temp file: %s\n", strerror(errno));
+        return;
+    }
     memset(dirty, 0, sizeof(dirty));
 }
 
@@ -78,26 +114,48 @@ void refresh_screen(void)
 {
     getmaxyx(stdscr, screen_rows, screen_cols);
     clear();
-    for (int y = 0; y < screen_rows - 1; y++)
+    
+    if (screen_rows <= 0 || screen_cols <= 0)
+        return;
+        
+    for (int y = 0; y < screen_rows - 1 && y < MAX_LINES; y++)
     {
         int fy = y + rowoff;
-        if (fy >= line_count)
+        if (fy >= line_count || fy < 0 || !lines[fy])
             continue;
+            
         int len = strlen(lines[fy]);
-        if (coloff < len)
-            mvaddnstr(y, 0, lines[fy] + coloff, screen_cols);
+        if (coloff < len && coloff >= 0)
+        {
+            int max_chars = screen_cols;
+            if (len - coloff < max_chars)
+                max_chars = len - coloff;
+                
+            if (max_chars > 0)
+                mvaddnstr(y, 0, lines[fy] + coloff, max_chars);
+        }
     }
+    
     attron(A_REVERSE);
-    mvprintw(screen_rows - 1, 0, "ESC/Ctrl+Q to quit | Ln %d, Col %d%s | By Rahul Dange",
-             cy + 1, cx + 1, dirty[cy] ? " *" : "");
+    char status[256];
+    snprintf(status, sizeof(status), "ESC/Ctrl+Q to quit | Ln %d, Col %d%s | By Rahul Dange",
+             cy + 1, cx + 1, (cy >= 0 && cy < MAX_LINES && dirty[cy]) ? " *" : "");
+    mvprintw(screen_rows - 1, 0, "%s", status);
     clrtoeol();
     attroff(A_REVERSE);
-    move(cy - rowoff, cx - coloff);
+    
+    if (cy >= 0 && cy < MAX_LINES && cx >= 0 && cx < MAX_COLS)
+        move(cy - rowoff, cx - coloff);
     refresh();
 }
 
 void editor_scroll(void)
 {
+    if (cy < 0) cy = 0;
+    if (cx < 0) cx = 0;
+    if (rowoff < 0) rowoff = 0;
+    if (coloff < 0) coloff = 0;
+    
     if (cy < rowoff)
         rowoff = cy;
     if (cy >= rowoff + screen_rows - 1)
@@ -106,10 +164,24 @@ void editor_scroll(void)
         coloff = cx;
     if (cx >= coloff + screen_cols)
         coloff = cx - screen_cols + 1;
+        
+    if (rowoff < 0) rowoff = 0;
+    if (coloff < 0) coloff = 0;
 }
 
 void insert_char(int ch)
 {
+    if (cy < 0 || cy >= MAX_LINES || cx < 0 || cx >= MAX_COLS)
+        return;
+        
+    if (!lines[cy]) {
+        lines[cy] = strdup("");
+        if (!lines[cy]) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return;
+        }
+    }
+        
     if (ch == '\t')
     {
         for (int i = 0; i < 4; i++)
@@ -118,84 +190,163 @@ void insert_char(int ch)
     }
 
     char *line = lines[cy];
-    int len = strlen(line);
-    if (len >= MAX_COLS - 2)
+    if (!line) return;
+    
+    size_t len = strlen(line);
+    if (len >= (size_t)(MAX_COLS - 2) || cx > (int)len)
         return;
 
     char *newl = malloc(len + 2);
+    if (!newl) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return;
+    }
+    
+    if (cx > (int)len) cx = len;
+    
     memcpy(newl, line, cx);
     newl[cx] = ch;
     strcpy(newl + cx + 1, line + cx);
     free(line);
     lines[cy] = newl;
-    cx++;
+    
+    if (cx < MAX_COLS - 1) cx++;
     dirty[cy] = 1;
     atomic_save();
 }
 
 void insert_newline(void)
 {
-    if (line_count >= MAX_LINES)
+    if (cy < 0 || cy >= MAX_LINES || line_count >= MAX_LINES)
         return;
+        
+    if (!lines[cy]) {
+        lines[cy] = strdup("");
+        if (!lines[cy]) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return;
+        }
+    }
 
     char *line = lines[cy];
+    if (!line) return;
+    
+    size_t line_len = strlen(line);
+    if (cx > (int)line_len) cx = line_len;
+    
     char *right = strdup(line + cx);
+    if (!right) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return;
+    }
+    
     line[cx] = '\0';
 
     for (int i = line_count; i > cy + 1; i--)
     {
-        lines[i] = lines[i - 1];
-        dirty[i] = dirty[i - 1];
+        if (i - 1 >= 0 && i - 1 < MAX_LINES) {
+            lines[i] = lines[i - 1];
+            dirty[i] = dirty[i - 1];
+        }
     }
-    lines[cy + 1] = right;
-    line_count++;
-    dirty[cy] = dirty[cy + 1] = 1;
-    cy++;
+    
+    if (cy + 1 < MAX_LINES) {
+        lines[cy + 1] = right;
+        dirty[cy + 1] = 1;
+    }
+    
+    if (line_count < MAX_LINES) line_count++;
+    dirty[cy] = 1;
+    
+    if (cy < MAX_LINES - 1) cy++;
     cx = 0;
     atomic_save();
 }
 
 void delete_char(void)
 {
+    if (cy < 0 || cy >= MAX_LINES || cx < 0)
+        return;
+        
+    if (!lines[cy]) {
+        lines[cy] = strdup("");
+        if (!lines[cy]) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return;
+        }
+        return;
+    }
+        
     char *line = lines[cy];
+    size_t len = strlen(line);
+    
     if (cx > 0)
     {
-        memmove(line + cx - 1, line + cx, strlen(line) - cx + 1);
-        cx--;
+        if (cx > (int)len) cx = len;
+        memmove(line + cx - 1, line + cx, len - cx + 1);
+        if (cx > 0) cx--;
         dirty[cy] = 1;
         atomic_save();
     }
-    else if (cy > 0)
+    else if (cy > 0 && cy < MAX_LINES)
     {
-        int prevlen = strlen(lines[cy - 1]);
-        int curlen = strlen(line);
-        if (prevlen + curlen >= MAX_COLS - 2)
+        if (!lines[cy - 1]) {
+            lines[cy - 1] = strdup("");
+            if (!lines[cy - 1]) {
+                fprintf(stderr, "Memory allocation failed\n");
+                return;
+            }
+        }
+        
+        size_t prevlen = strlen(lines[cy - 1]);
+        if (prevlen + len >= (size_t)(MAX_COLS - 2))
             return;
 
-        char *merged = malloc(prevlen + curlen + 1);
+        char *merged = malloc(prevlen + len + 1);
+        if (!merged) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return;
+        }
+        
         strcpy(merged, lines[cy - 1]);
         strcat(merged, line);
 
         free(lines[cy - 1]);
         free(line);
         lines[cy - 1] = merged;
+        lines[cy] = NULL;
 
-        for (int i = cy; i < line_count - 1; i++)
+        for (int i = cy; i < line_count - 1 && i < MAX_LINES - 1; i++)
         {
             lines[i] = lines[i + 1];
             dirty[i] = dirty[i + 1];
         }
-        line_count--;
-        cy--;
+        
+        if (line_count > 0) line_count--;
+        if (cy > 0) cy--;
         cx = prevlen;
-        dirty[cy] = 1;
+        if (cy >= 0 && cy < MAX_LINES) dirty[cy] = 1;
         atomic_save();
     }
 }
 
 void move_cursor(int key)
 {
+    if (cy < 0) cy = 0;
+    if (cx < 0) cx = 0;
+    if (cy >= line_count) cy = line_count - 1;
+    if (cy >= MAX_LINES) cy = MAX_LINES - 1;
+    
+    if (!lines[cy]) {
+        lines[cy] = strdup("");
+        if (!lines[cy]) {
+            fprintf(stderr, "Memory allocation failed\n");
+            return;
+        }
+    }
+        
     size_t len = strlen(lines[cy]);
+    
     switch (key)
     {
     case KEY_LEFT:
@@ -204,13 +355,16 @@ void move_cursor(int key)
         else if (cy > 0)
         {
             cy--;
-            cx = strlen(lines[cy]);
+            if (cy >= 0 && cy < MAX_LINES && lines[cy])
+                cx = strlen(lines[cy]);
+            else
+                cx = 0;
         }
         break;
     case KEY_RIGHT:
         if ((size_t)cx < len)
             cx++;
-        else if (cy < line_count - 1)
+        else if (cy < line_count - 1 && cy < MAX_LINES - 1)
         {
             cy++;
             cx = 0;
@@ -221,7 +375,7 @@ void move_cursor(int key)
             cy--;
         break;
     case KEY_DOWN:
-        if (cy < line_count - 1)
+        if (cy < line_count - 1 && cy < MAX_LINES - 1)
             cy++;
         break;
     case KEY_HOME:
@@ -231,9 +385,17 @@ void move_cursor(int key)
         cx = len;
         break;
     }
-    len = strlen(lines[cy]);
-    if ((size_t)cx > len)
-        cx = len;
+    
+    if (cy >= 0 && cy < MAX_LINES && lines[cy]) {
+        len = strlen(lines[cy]);
+        if ((size_t)cx > len)
+            cx = len;
+    }
+    
+    if (cx < 0) cx = 0;
+    if (cy < 0) cy = 0;
+    if (cx >= MAX_COLS) cx = MAX_COLS - 1;
+    if (cy >= MAX_LINES) cy = MAX_LINES - 1;
 }
 
 void load_file(const char *path)
@@ -245,6 +407,10 @@ void load_file(const char *path)
     if (!fp)
     {
         lines[0] = strdup("");
+        if (!lines[0]) {
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(1);
+        }
         line_count = 1;
         return;
     }
@@ -274,6 +440,12 @@ void load_file(const char *path)
             long_line[long_len] = '\0';
 
             char *linebuf = malloc(strlen(long_line) * 4 + 1);
+            if (!linebuf) {
+                fprintf(stderr, "Memory allocation failed\n");
+                fclose(fp);
+                exit(1);
+            }
+            
             char *src = long_line, *dst = linebuf;
             while (*src)
             {
@@ -293,7 +465,15 @@ void load_file(const char *path)
                 src++;
             }
             *dst = '\0';
-            lines[line_count++] = strdup(linebuf);
+            
+            lines[line_count] = strdup(linebuf);
+            if (!lines[line_count]) {
+                fprintf(stderr, "Memory allocation failed\n");
+                free(linebuf);
+                fclose(fp);
+                exit(1);
+            }
+            line_count++;
             free(linebuf);
             long_len = 0;
         }
@@ -303,6 +483,10 @@ void load_file(const char *path)
     if (line_count == 0)
     {
         lines[0] = strdup("");
+        if (!lines[0]) {
+            fprintf(stderr, "Memory allocation failed\n");
+            exit(1);
+        }
         line_count = 1;
     }
     memset(dirty, 0, sizeof(dirty));
@@ -310,26 +494,47 @@ void load_file(const char *path)
 
 int main(int argc, char *argv[])
 {
-    if (argc != 2)
+    if (argc != 2 || !argv[1] || strlen(argv[1]) == 0)
     {
-        fprintf(stderr, "Usage: %s <file>\n", argv[0]);
+        fprintf(stderr, "Usage: %s <file>\n", argv[0] ? argv[0] : "edit");
         return 1;
     }
+
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     load_file(argv[1]);
 
     setenv("TERM", "xterm-256color", 1);
     setenv("ESCDELAY", "25", 1);         
-    initscr();
+    
+    if (initscr() == NULL) {
+        fprintf(stderr, "Failed to initialize ncurses\n");
+        cleanup();
+        return 1;
+    }
+    
     raw();
     noecho();
     keypad(stdscr, TRUE);
     getmaxyx(stdscr, screen_rows, screen_cols);
+    
+    if (screen_rows <= 0 || screen_cols <= 0) {
+        fprintf(stderr, "Invalid terminal size\n");
+        cleanup();
+        return 1;
+    }
 
-    while (1)
+    while (!quit_flag)
     {
+        if (cy < 0) cy = 0;
+        if (cx < 0) cx = 0;
+        if (cy >= line_count) cy = line_count - 1;
+        if (cy >= MAX_LINES) cy = MAX_LINES - 1;
+        
         editor_scroll();
         refresh_screen();
+        
         int ch = getch();
         if (ch == KEY_ESC || ch == KEY_CTRL_Q)
             break;
@@ -346,7 +551,8 @@ int main(int argc, char *argv[])
         }
         else if (ch >= 32 && ch <= 126)
             insert_char(ch);
-        else
+        else if (ch == KEY_UP || ch == KEY_DOWN || ch == KEY_LEFT || ch == KEY_RIGHT ||
+                 ch == KEY_HOME || ch == KEY_END)
             move_cursor(ch);
     }
 
