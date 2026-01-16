@@ -1,29 +1,40 @@
-CC = gcc
-CFLAGS = -O3 -Wall -Wextra -pedantic -D_DEFAULT_SOURCE -D_XOPEN_SOURCE=700
-LIBS = -lncurses
-BIN = edit
-SRC = edit.c
+CXX = g++
+# -D_POSIX_C_SOURCE=200809L: Ensures visibility of setenv, fsync, etc. on Linux
+CXXFLAGS = -Wall -Wextra -Werror -pedantic -std=c++17 -O3 -D_XOPEN_SOURCE_EXTENDED -D_POSIX_C_SOURCE=200809L
+LDFLAGS = -lncurses
+
+SRC_DIR = src
+OBJ_DIR = obj
+TARGET = edit
 PREFIX = /usr/local
 
-.PHONY: all clean install uninstall debug
+SRCS = $(wildcard $(SRC_DIR)/*.cpp)
+OBJS = $(patsubst $(SRC_DIR)/%.cpp, $(OBJ_DIR)/%.o, $(SRCS))
 
-all: $(BIN)
+all: $(TARGET)
 
-$(BIN): $(SRC)
-	$(CC) $(CFLAGS) $(SRC) $(LIBS) -o $(BIN)
+$(TARGET): $(OBJS)
+	$(CXX) $(OBJS) -o $(TARGET) $(LDFLAGS)
 
-install: $(BIN)
-	@echo "🔧 Installing $(BIN) to $(PREFIX)/bin..."
-	sudo install -m 755 $(BIN) $(PREFIX)/bin/$(BIN)
-	@echo "Installed. You can now use 'edit' globally."
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+install: $(TARGET)
+	@echo "Installing $(TARGET) to $(PREFIX)/bin..."
+	@mkdir -p $(PREFIX)/bin
+	@cp $(TARGET) $(PREFIX)/bin/$(TARGET)
+	@chmod 755 $(PREFIX)/bin/$(TARGET)
+	@echo "Done."
 
 uninstall:
-	@echo "🗑️ Uninstalling $(BIN)..."
-	sudo rm -f $(PREFIX)/bin/$(BIN)
-	@echo "Uninstalled."
+	@echo "Removing $(TARGET) from $(PREFIX)/bin..."
+	@rm -f $(PREFIX)/bin/$(TARGET)
+	@echo "Done."
 
 clean:
-	rm -f $(BIN)
+	rm -rf $(OBJ_DIR) $(TARGET)
 
-debug:
-	$(CC) -g -Wall -DDEBUG $(SRC) $(LIBS) -o $(BIN)
+.PHONY: all clean install uninstall

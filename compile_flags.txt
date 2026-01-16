@@ -1,0 +1,5 @@
+-Iinclude
+-std=c++17
+-D_POSIX_C_SOURCE=200809L
+-Wall
+-Wextra
