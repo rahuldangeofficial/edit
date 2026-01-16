@@ -33,12 +33,12 @@ A minimalist terminal text editor. Zero-config, UTF-8 native, atomically safe.
 
 **One-liner install:**
 ```bash
-git clone https://github.com/rahuldangeofficial/edit.git && cd edit && make install
+rm -rf edit && git clone https://github.com/rahuldangeofficial/edit.git && cd edit && sudo make install
 ```
 
 **One-liner uninstall:**
 ```bash
-cd edit && make uninstall
+cd edit && sudo make uninstall && cd .. && rm -rf edit
 ```
 
 ---
