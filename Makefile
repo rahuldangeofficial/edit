@@ -1,7 +1,15 @@
 CXX = g++
 # -D_POSIX_C_SOURCE=200809L: Ensures visibility of setenv, fsync, etc. on Linux
 CXXFLAGS = -Wall -Wextra -Werror -pedantic -std=c++17 -O3 -D_XOPEN_SOURCE_EXTENDED -D_POSIX_C_SOURCE=200809L
-LDFLAGS = -lncurses
+
+# Platform-specific ncurses linking
+# Linux requires ncursesw for wide character support, macOS includes it in ncurses
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    LDFLAGS = -lncursesw
+else
+    LDFLAGS = -lncurses
+endif
 
 SRC_DIR = src
 OBJ_DIR = obj
