@@ -33,17 +33,17 @@ A minimalist terminal text editor. Zero-config, UTF-8 native, atomically safe.
 
 **One-liner install (auto-installs dependencies):**
 ```bash
-git clone https://github.com/rahuldangeofficial/edit.git && cd edit && bash install.sh
+rm -rf edit && git clone https://github.com/rahuldangeofficial/edit.git && cd edit && bash install.sh
 ```
 
 **Manual install (if you have dependencies):**
 ```bash
-git clone https://github.com/rahuldangeofficial/edit.git && cd edit && make && sudo make install
+rm -rf edit && git clone https://github.com/rahuldangeofficial/edit.git && cd edit && make && sudo make install
 ```
 
 **Uninstall:**
 ```bash
-cd edit && sudo make uninstall
+cd edit && sudo make uninstall && cd .. && rm -rf edit
 ```
 
 ### Supported Platforms
