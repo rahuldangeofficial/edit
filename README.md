@@ -31,15 +31,27 @@ A minimalist terminal text editor. Zero-config, UTF-8 native, atomically safe.
 
 ## Installation
 
-**One-liner install:**
+**One-liner install (auto-installs dependencies):**
 ```bash
-rm -rf edit && git clone https://github.com/rahuldangeofficial/edit.git && cd edit && sudo make install
+git clone https://github.com/rahuldangeofficial/edit.git && cd edit && bash install.sh
 ```
 
-**One-liner uninstall:**
+**Manual install (if you have dependencies):**
 ```bash
-cd edit && sudo make uninstall && cd .. && rm -rf edit
+git clone https://github.com/rahuldangeofficial/edit.git && cd edit && make && sudo make install
 ```
+
+**Uninstall:**
+```bash
+cd edit && sudo make uninstall
+```
+
+### Supported Platforms
+- Debian / Ubuntu
+- Fedora / RHEL / CentOS
+- Arch Linux
+- Alpine Linux
+- macOS
 
 ---
 
