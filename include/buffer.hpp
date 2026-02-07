@@ -33,7 +33,7 @@ public:
   /**
    * @brief Load content from a file path.
    * @param path File path.
-   * @throws std::runtime_error if file exisits but cannot be read.
+   * @throws std::runtime_error if file exists but cannot be read.
    */
   void Load(const std::string &path);
 
@@ -93,6 +93,14 @@ public:
    * @param x Column index.
    */
   void DeleteChar(int y, int x);
+
+  /**
+   * @brief Delete character forward at specific coordinates (Delete key).
+   * @param y Line index.
+   * @param x Column index.
+   * @note If at end of line, merges with next line.
+   */
+  void DeleteCharForward(int y, int x);
 
   /**
    * @brief Insert a newline at coordinates (split line).

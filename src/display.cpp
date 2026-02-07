@@ -5,23 +5,24 @@
  */
 
 #include "../include/display.hpp"
+#include "../include/constants.hpp"
 #include "../include/textutils.hpp"
 #include <ncurses.h>
 #include <stdexcept>
 #include <string>
 
 Display::Display() : m_rowOff(0), m_colOff(0), m_gutterWidth(4) {
-  // Reduce ESC delay to 25ms for better responsiveness
-  setenv("ESCDELAY", "25", 1);
+  // Reduce ESC delay to minimum for instant response
+  setenv("ESCDELAY", "5", 1);
 
   if (initscr() == NULL) {
     throw std::runtime_error("Failed to initialize ncurses");
   }
 
-  raw();                // Disable line buffering
-  noecho();             // Don't echo input
-  keypad(stdscr, TRUE); // Enable arrow keys
-  timeout(100);         // Non-blocking read (100ms) for signal check
+  raw();                            // Disable line buffering
+  noecho();                         // Don't echo input
+  keypad(stdscr, TRUE);             // Enable arrow keys
+  timeout(16);                      // ~60fps, minimal delay
   mousemask(BUTTON1_CLICKED, NULL); // Enable left-click
 
   getmaxyx(stdscr, m_screenRows, m_screenCols);
@@ -57,11 +58,17 @@ void Display::Scroll(const Buffer &buffer, int cursorY, int cursorX) {
   if (cursorY >= m_rowOff + m_screenRows - 1) { // -1 for status bar
     m_rowOff = cursorY - m_screenRows + 2;
   }
+  // Ensure scroll offset is never negative
+  if (m_rowOff < 0) {
+    m_rowOff = 0;
+  }
 
   // Horizontal Scroll
   // Convert cursor byte index to visual column
   std::string line = buffer.GetLine(cursorY);
-  std::string upToCursor = line.substr(0, cursorX);
+  int lineSize = static_cast<int>(line.size());
+  int safeX = (cursorX > lineSize) ? lineSize : cursorX;
+  std::string upToCursor = line.substr(0, static_cast<size_t>(safeX));
   int visualX = TextUtils::VisualWidth(upToCursor);
 
   int textAreaWidth = m_screenCols - m_gutterWidth;
@@ -80,17 +87,36 @@ void Display::Render(const Buffer &buffer, int cursorY, int cursorX) {
 
   // Map byte-index cursor to visual column
   std::string line = buffer.GetLine(cursorY);
-  // Calculate visual width up to the cursor position
-  std::string upToCursor = line.substr(0, cursorX);
+  // Calculate visual width up to the cursor position (with bounds check)
+  int lineSize = static_cast<int>(line.size());
+  int safeX = (cursorX > lineSize) ? lineSize : cursorX;
+  std::string upToCursor = line.substr(0, static_cast<size_t>(safeX));
   int visualX = TextUtils::VisualWidth(upToCursor);
 
-  move(cursorY - m_rowOff, m_gutterWidth + visualX - m_colOff);
+  // Clamp cursor screen position to valid range
+  int screenY = cursorY - m_rowOff;
+  int screenX = m_gutterWidth + visualX - m_colOff;
+  if (screenY < 0)
+    screenY = 0;
+  if (screenY >= m_screenRows - 1)
+    screenY = m_screenRows - 2;
+  if (screenX < m_gutterWidth)
+    screenX = m_gutterWidth;
+  if (screenX >= m_screenCols)
+    screenX = m_screenCols - 1;
+
+  move(screenY, screenX);
   refresh();
 }
 
 void Display::DrawRows(const Buffer &buffer) {
   int maxRows = m_screenRows - 1; // Reserve 1 line for status
   int textAreaWidth = m_screenCols - m_gutterWidth;
+
+  // Safety check for very narrow terminals
+  if (textAreaWidth < 1) {
+    textAreaWidth = 1;
+  }
 
   for (int y = 0; y < maxRows; y++) {
     int fileRow = y + m_rowOff;
@@ -133,6 +159,11 @@ void Display::UpdateGutterWidth(int lineCount) {
     digits++;
   }
   m_gutterWidth = digits + 1; // +1 for space separator
+
+  // Enforce minimum gutter width of 2
+  if (m_gutterWidth < 2) {
+    m_gutterWidth = 2;
+  }
 }
 
 void Display::DrawStatusBar(const Buffer &buffer, int cursorY, int cursorX) {
@@ -140,32 +171,72 @@ void Display::DrawStatusBar(const Buffer &buffer, int cursorY, int cursorX) {
 
   std::string filename =
       buffer.GetFileName().empty() ? "[No Name]" : buffer.GetFileName();
-  std::string details = " - " + std::to_string(buffer.LineCount()) + " lines" +
-                        (buffer.IsDirty() ? " (Modified)" : "");
+  std::string modified = buffer.IsDirty() ? "*" : "";
+  std::string lineInfo = std::to_string(buffer.LineCount()) + "L";
 
-  std::string branding =
-      "edit v2.0.0 by @rahuldangeofficial | " + filename + details;
+  // Calculate visual column
+  const std::string &line = buffer.GetLine(cursorY);
+  int lineSize = static_cast<int>(line.size());
+  int safeX = (cursorX > lineSize) ? lineSize : cursorX;
+  std::string upToCursor = line.substr(0, static_cast<size_t>(safeX));
+  int visualCol = TextUtils::VisualWidth(upToCursor) + 1;
+  std::string cursorInfo =
+      std::to_string(cursorY + 1) + ":" + std::to_string(visualCol);
 
-  std::string rStatus = "Ln " + std::to_string(cursorY + 1) + ", Col " +
-                        std::to_string(cursorX + 1) + " ";
+  int row = m_screenRows - 1;
 
-  int len = (int)branding.size();
-  int rLen = (int)rStatus.size();
+  // Progressive truncation levels
+  std::string fullBrand = "edit v" + Edit::VERSION + " by @rahuldangeofficial";
+  std::string shortBrand = "edit v" + Edit::VERSION;
+  std::string minBrand = "edit";
+  std::string fileStr = filename + modified + " " + lineInfo;
+  std::string right = "ESC | " + cursorInfo;
 
-  // Truncate if screen is too small
-  if (len > m_screenCols)
-    len = m_screenCols;
+  std::string left;
+  int gap = 3; // minimum gap between left and right
 
-  mvprintw(m_screenRows - 1, 0, "%s", branding.substr(0, len).c_str());
+  // Calculate sizes as int
+  int fullLen = static_cast<int>(fullBrand.size() + 3 + fileStr.size()) + gap +
+                static_cast<int>(right.size());
+  int shortLen = static_cast<int>(shortBrand.size() + 3 + fileStr.size()) +
+                 gap + static_cast<int>(right.size());
+  int minLen = static_cast<int>(minBrand.size() + 3 + fileStr.size()) + gap +
+               static_cast<int>(right.size());
+  int fileOnlyLen =
+      static_cast<int>(fileStr.size()) + gap + static_cast<int>(right.size());
 
-  // Fill the rest with whitespace
-  for (int i = len; i < m_screenCols; i++) {
-    mvaddch(m_screenRows - 1, i, ' ');
+  // Try progressively shorter versions
+  if (fullLen <= m_screenCols) {
+    left = fullBrand + " | " + fileStr;
+  } else if (shortLen <= m_screenCols) {
+    left = shortBrand + " | " + fileStr;
+  } else if (minLen <= m_screenCols) {
+    left = minBrand + " | " + fileStr;
+  } else if (fileOnlyLen <= m_screenCols) {
+    left = fileStr;
+  } else {
+    // Very narrow: truncate filename
+    int avail = m_screenCols - static_cast<int>(right.size()) - gap - 2;
+    if (avail > 3 && avail <= static_cast<int>(filename.size())) {
+      left = filename.substr(0, static_cast<size_t>(avail)) + "..";
+    } else {
+      left = "";
+    }
   }
 
-  // Right aligned status
-  if (m_screenCols > len + rLen) {
-    mvprintw(m_screenRows - 1, m_screenCols - rLen, "%s", rStatus.c_str());
+  // Draw left side
+  mvprintw(row, 0, "%s", left.c_str());
+
+  // Fill with spaces
+  int leftLen = static_cast<int>(left.size());
+  for (int i = leftLen; i < m_screenCols; i++) {
+    mvaddch(row, i, ' ');
+  }
+
+  // Draw right side
+  int rightLen = static_cast<int>(right.size());
+  if (m_screenCols > rightLen) {
+    mvprintw(row, m_screenCols - rightLen, "%s", right.c_str());
   }
 
   attroff(A_DIM);

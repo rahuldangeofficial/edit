@@ -52,7 +52,7 @@ private:
   void InsertChar(int c);
   void InsertNewLine();
   void DeleteChar();
-  void Save();
+  void DeleteCharForward();
   void HandleMouseClick(int screenY, int screenX);
 };
 

@@ -11,14 +11,17 @@
 #include "../include/input.hpp"
 #include <ncurses.h>
 
-// Control Key Macro: (k & 0x1f)
-#define CTRL_KEY(k) ((k) & 0x1f)
-
 Edit::Key Input::ReadKey() {
   wint_t ch;
   int ret = get_wch(&ch);
 
   Edit::Key key = {Edit::K_UNKNOWN, 0, 0, 0};
+
+  // Handle timeout/no input
+  if (ret == ERR) {
+    key.type = Edit::K_NONE;
+    return key;
+  }
 
   if (ret == KEY_CODE_YES) {
     // Handle special keys
@@ -62,6 +65,11 @@ Edit::Key Input::ReadKey() {
       }
       break;
     }
+    case KEY_RESIZE:
+      key.type = Edit::K_RESIZE;
+      break;
+    default:
+      break;
     }
   } else if (ret == OK) {
     // Handle standard characters and control codes
@@ -74,15 +82,16 @@ Edit::Key Input::ReadKey() {
     case '\r':
       key.type = Edit::K_ENTER;
       break;
-    case CTRL_KEY('q'):
-    case 27:
+    case 27: // ESC only
       key.type = Edit::K_QUIT;
       break;
     default:
-      if (ch >= 32 || ch == '\t') { // Allow proper Unicode code points
+      // Allow tab and printable characters (including Unicode)
+      if (ch == '\t' || ch >= 32) {
         key.type = Edit::K_CHAR;
-        key.value = (int)ch; // Store code point potentially > 255
+        key.value = static_cast<int>(ch);
       }
+      // Control chars 0-31 (except tab) are ignored
       break;
     }
   }

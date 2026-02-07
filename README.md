@@ -1,4 +1,4 @@
-# edit v2.0.0 by @rahuldangeofficial
+# edit v2.0.2 by @rahuldangeofficial
 
 A minimalist terminal text editor. Zero-config, UTF-8 native, atomically safe.
 
@@ -26,6 +26,8 @@ A minimalist terminal text editor. Zero-config, UTF-8 native, atomically safe.
 - **Line numbers** — Always visible, dynamic width
 - **Mouse support** — Click to position cursor
 - **Large file warning** — Prompts before loading files >100 MB
+- **Safety Hardened** — Zero warnings with strict compiler flags (`-Weverything`)
+- **Adaptive UI** — Status bar scales for narrow terminals
 
 ---
 
@@ -69,8 +71,9 @@ edit filename.txt
 | Home / End | Jump to line start/end |
 | PageUp / PageDown | Scroll |
 | Backspace | Delete character |
+| Delete | Delete forward |
 | Enter | New line |
-| Esc / Ctrl+Q | Save and exit |
+| Esc | Save and exit |
 | Mouse click | Position cursor |
 
 ---

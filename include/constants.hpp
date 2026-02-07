@@ -18,7 +18,7 @@ const std::string TEMP_EXTENSION = ".tmp";
 const int TAB_STOP = 4;
 
 // Version Info
-const std::string VERSION = "2.0.0";
+const std::string VERSION = "2.0.2";
 
 } // namespace Edit
 

@@ -12,6 +12,7 @@ namespace Edit {
 // Key types for internal handling
 enum KeyType {
   K_UNKNOWN = 0,
+  K_NONE, // No input (timeout)
   K_CHAR,
   K_ENTER,
   K_BACKSPACE,
@@ -24,9 +25,9 @@ enum KeyType {
   K_HOME,
   K_END,
   K_DELETE,
-  K_ESC,
-  K_QUIT, // Ctrl-Q
-  K_MOUSE // Mouse click
+  K_QUIT,  // ESC key (formerly K_ESC)
+  K_MOUSE, // Mouse click
+  K_RESIZE // Terminal resize
 };
 
 struct Key {

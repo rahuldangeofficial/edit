@@ -36,7 +36,7 @@ inline int VisualWidth(const std::string &str) {
     } else {
       int w = wcwidth(wc);
       width += (w >= 0 ? w : 1); // treat unprintable as size 1 for safety
-      i += len;
+      i += static_cast<size_t>(len);
     }
   }
   return width;
@@ -44,6 +44,8 @@ inline int VisualWidth(const std::string &str) {
 
 /// Get byte length of the UTF-8 character starting at s[i].
 inline int CharBytesAt(const std::string &s, size_t i) {
+  if (i >= s.size())
+    return 0;
   unsigned char c = static_cast<unsigned char>(s[i]);
   if (c < 0x80)
     return 1;
@@ -53,7 +55,7 @@ inline int CharBytesAt(const std::string &s, size_t i) {
     return 3;
   if ((c & 0xF8) == 0xF0)
     return 4;
-  return 1; // Fallback for invalid or continuation bytes treated strictly
+  return 1; // Fallback for invalid or continuation bytes
 }
 
 /// Move index forward by one UTF-8 code point.
@@ -68,7 +70,7 @@ inline size_t NextCharIdx(const std::string &s, size_t i) {
 
   // Ensure we don't land in the middle of a sequence if the string is malformed
   // A primitive loop to skip continuation bytes (0b10xxxxxx)
-  size_t next = i + len;
+  size_t next = i + static_cast<size_t>(len);
   while (next < s.size()) {
     unsigned char c = static_cast<unsigned char>(s[next]);
     if ((c & 0xC0) != 0x80)
@@ -118,7 +120,7 @@ inline std::string TrimToVisual(const std::string &s, int colOff, int maxCols) {
       w = 1; // Treat unprintable characters as width 1
 
     currentVisual += w;
-    i += len;
+    i += static_cast<size_t>(len);
   }
 
   // If split occurs in the middle of a wide character, render from current
@@ -144,9 +146,9 @@ inline std::string TrimToVisual(const std::string &s, int colOff, int maxCols) {
     if (printedVisual + w > maxCols)
       break; // Don't cut halfway
 
-    result.append(s, i, len);
+    result.append(s, i, static_cast<size_t>(len));
     printedVisual += w;
-    i += len;
+    i += static_cast<size_t>(len);
   }
 
   return result;
@@ -156,19 +158,19 @@ inline std::string TrimToVisual(const std::string &s, int colOff, int maxCols) {
 inline std::string CodePointToUtf8(int cp) {
   std::string result;
   if (cp <= 0x7F) {
-    result += (char)cp;
+    result += static_cast<char>(cp);
   } else if (cp <= 0x7FF) {
-    result += (char)(0xC0 | ((cp >> 6) & 0x1F));
-    result += (char)(0x80 | (cp & 0x3F));
+    result += static_cast<char>(0xC0 | ((cp >> 6) & 0x1F));
+    result += static_cast<char>(0x80 | (cp & 0x3F));
   } else if (cp <= 0xFFFF) {
-    result += (char)(0xE0 | ((cp >> 12) & 0x0F));
-    result += (char)(0x80 | ((cp >> 6) & 0x3F));
-    result += (char)(0x80 | (cp & 0x3F));
+    result += static_cast<char>(0xE0 | ((cp >> 12) & 0x0F));
+    result += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    result += static_cast<char>(0x80 | (cp & 0x3F));
   } else if (cp <= 0x10FFFF) {
-    result += (char)(0xF0 | ((cp >> 18) & 0x07));
-    result += (char)(0x80 | ((cp >> 12) & 0x3F));
-    result += (char)(0x80 | ((cp >> 6) & 0x3F));
-    result += (char)(0x80 | (cp & 0x3F));
+    result += static_cast<char>(0xF0 | ((cp >> 18) & 0x07));
+    result += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+    result += static_cast<char>(0x80 | ((cp >> 6) & 0x3F));
+    result += static_cast<char>(0x80 | (cp & 0x3F));
   }
   return result;
 }
